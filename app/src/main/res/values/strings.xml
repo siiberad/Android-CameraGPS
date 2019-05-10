@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">Camera app</string>
+    <string name="start_camera">Start Camera</string>
+    <string name="imageview">imageView</string>
+
+    <string name="delete_success">Images was deleted!</string>
+    <string name="saved_message">Image Saved at %1$s</string>
+    <string name="not_saved">Image not saved!</string>
+    <string name="error">Error finding image</string>
+    <string name="go">GO</string>
+    <string name="permission_denied">Permission denied</string>
+    <string name="imageview_description">The imageview that contains the emojified picture</string>
+    <string name="no_geocoder_available">No geocoder available</string>
+
+    <string name="fetch_address">Fetch address</string>
+
+    <string name="address_found">Address found</string>
+
+    <string name="no_address_found">Sorry, no address found</string>
+    <string name="no_location_data_provided">No location data provided</string>
+    <string name="service_not_available">Sorry, the service is not available</string>
+    <string name="invalid_lat_long_used">Invalid latitude or longitude used</string>
+
+
+    <string name="permission_rationale">Location permission is needed for core functionality</string>
+    <string name="permission_denied_explanation">Permission was denied, but is needed for core
+        functionality.</string>
+    <string name="settings">Settings</string>
+</resources>
