@@ -1,11 +1,22 @@
 package com.siiberad.kamera01;
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.location.Location;
 import android.net.Uri;
+import android.os.Environment;
 import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
@@ -14,17 +25,39 @@ import android.support.v4.content.ContextCompat;
 import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import com.ajts.androidmads.fontutils.FontUtils;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.location.LocationListener;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationServices;
+
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class MainActivity extends AppCompatActivity {
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+
+public class MainActivity extends AppCompatActivity implements GoogleApiClient.ConnectionCallbacks,
+        GoogleApiClient.OnConnectionFailedListener,
+        LocationListener {
 
     private static final int REQUEST_IMAGE_CAPTURE = 1;
     private static final int REQUEST_STORAGE_PERMISSION = 1;
@@ -37,11 +70,23 @@ public class MainActivity extends AppCompatActivity {
 
     private Button mStartCamera;
 
-    private String mTempPhotoPath;
+    private String mTempPhotoPath,mTempPhotoPath2;
 
     private Bitmap mResultsBitmap;
 
     private FloatingActionButton mClear,mSave,mShare;
+
+    private final static int CONNECTION_FAILURE_RESOLUTION_REQUEST = 9000;
+    private final static int STORAGE_PERMISSION_CODE = 1 ;
+    private GoogleApiClient mGoogleApiClient;
+    private LocationRequest mLocationRequest;
+    private double currentLatitude;
+    private double currentLongitude;
+    public static String BaseUrl = "http://api.openweathermap.org/";
+    public static String AppId = "2e65127e909e178d0af311a81f39948c";
+    String city, temp;
+
+    Bitmap tempBitmap;
 
     @SuppressLint("RestrictedApi")
     @Override
@@ -63,22 +108,15 @@ public class MainActivity extends AppCompatActivity {
         mClear.setVisibility(View.GONE);
 
 
-
-
-
         mStartCamera.setOnClickListener(v -> {
-            // Check for the external storage permission
-            if (ContextCompat.checkSelfPermission(getApplicationContext(),
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(MainActivity.this,
+                    Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(MainActivity.this, "You have already granted this permission!",
+                        Toast.LENGTH_SHORT).show();
 
-                // If you do not have permission, request it
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                        REQUEST_STORAGE_PERMISSION);
-            } else {
-                // Launch the camera if the permission exists
                 launchCamera();
+            } else {
+                requestStoragePermission();
             }
         });
 
@@ -88,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
                 BitmapUtils.deleteImageFile(this, mTempPhotoPath);
 
                 // Save the image
-                BitmapUtils.saveImage(this, mResultsBitmap);
+                BitmapUtils.saveImage(this, tempBitmap);
 
             });
 
@@ -113,38 +151,65 @@ public class MainActivity extends AppCompatActivity {
 
         mShare.setOnClickListener((View v) -> {
 
-            mAppExcutor.diskIO().execute(() ->{
-                // Save the image
-                BitmapUtils.saveImage(this, mResultsBitmap);
+            mAppExcutor.diskIO().execute(() -> {
+                // Delete the temporary image file
+                BitmapUtils.saveImage1(tempBitmap);
+
+                BitmapUtils.send(this);
 
             });
 
-            // Share the image
-            BitmapUtils.shareImage(this, mTempPhotoPath);
-
         });
+
+        //location
+
+
+
+        mGoogleApiClient = new GoogleApiClient.Builder(this)
+                // The next two lines tell the new client that “this” current class will handle connection stuff
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                //fourth line adds the LocationServices API endpoint from GooglePlayServices
+                .addApi(LocationServices.API)
+                .build();
+
+        // Create the LocationRequest object
+        mLocationRequest = LocationRequest.create()
+                .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
+                .setInterval(10 * 1000)        // 10 seconds, in milliseconds
+                .setFastestInterval(1 * 1000); // 1 second, in milliseconds
 
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
-        // Called when you request permission to read and write to external storage
-        switch (requestCode) {
-            case REQUEST_STORAGE_PERMISSION: {
-                if (grantResults.length > 0
-                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    // If you get permission, launch the camera
-                    launchCamera();
-                } else {
-                    // If you do not get permission, show a Toast
-                    Toast.makeText(this, R.string.permission_denied, Toast.LENGTH_SHORT).show();
-                }
-                break;
-            }
+
+    private void requestStoragePermission() {
+        if (ActivityCompat.shouldShowRequestPermissionRationale(this,
+                Manifest.permission.CAMERA)) {
+
+            new AlertDialog.Builder(this)
+                    .setTitle("Permission needed")
+                    .setMessage("This permission is needed because of this and that")
+                    .setPositiveButton("ok", (dialog, which) -> ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[] {Manifest.permission.CAMERA}, STORAGE_PERMISSION_CODE))
+                    .setNegativeButton("cancel", (dialog, which) -> dialog.dismiss())
+                    .create().show();
+
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[] {Manifest.permission.CAMERA}, STORAGE_PERMISSION_CODE);
         }
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        if (requestCode == STORAGE_PERMISSION_CODE)  {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Permission GRANTED", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Permission DENIED", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -209,16 +274,156 @@ public class MainActivity extends AppCompatActivity {
         // Resample the saved image to fit the ImageView
         mResultsBitmap = BitmapUtils.resamplePic(this, mTempPhotoPath);
 
+        tempBitmap = Bitmap.createBitmap(mResultsBitmap.getWidth(), mResultsBitmap.getHeight(), Bitmap.Config.RGB_565);
+        Canvas tempCanvas = new Canvas(tempBitmap);
+        Paint paint = new Paint();
+        paint.setColor(Color.YELLOW);
+        paint.setTextSize(200);
 
-        // Set the new bitmap to the ImageView
-        mImageView.setImageBitmap(mResultsBitmap);
+
+        //Draw the image bitmap into the cavas
+        tempCanvas.drawBitmap(mResultsBitmap, 0, 0, null);
+
+        //Draw everything else you want into the canvas, in this example a rectangle with rounded edges
+        tempCanvas.drawText(city, 100, 300, paint);
+        tempCanvas.drawText(temp, 100, 500, paint);
+
+        //Attach the canvas to the ImageView
+
+        mImageView.setImageDrawable(new BitmapDrawable(getResources(), tempBitmap));
+
+        // Set the new bitmap to the Ima       geView
+
     }
 
-    public void onButtonClick(View v){
-        Intent myIntent = new Intent(getBaseContext(), LocationActivity.class);
-        startActivity(myIntent);
+
+    //LOCATION===============================================
+
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        //Now lets connect to the API
+        mGoogleApiClient.connect();
     }
 
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Log.v(this.getClass().getSimpleName(), "onPause()");
+
+        //Disconnect from API onPause()
+        if (mGoogleApiClient.isConnected()) {
+            LocationServices.FusedLocationApi.removeLocationUpdates(mGoogleApiClient, this);
+            mGoogleApiClient.disconnect();
+        }
+
+
+    }
+
+    /**
+     * If connected get lat and long
+     *
+     */
+    @SuppressLint("SetTextI18n")
+    @Override
+    public void onConnected(Bundle bundle) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            return;
+        }
+        Location location = LocationServices.FusedLocationApi.getLastLocation(mGoogleApiClient);
+
+        if (location == null) {
+            LocationServices.FusedLocationApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
+
+        } else {
+            //If everything went fine lets get latitude and longitude
+            currentLatitude = location.getLatitude();
+            currentLongitude = location.getLongitude();
+
+
+
+//            Geocoder geocoder = new Geocoder(this, Locale.getDefault());
+//            List<Address> addresses = null;
+//            try {
+//                addresses = geocoder.getFromLocation(currentLatitude, currentLongitude, 1);
+//            } catch (IOException e) {
+//                e.printStackTrace();
+//            }
+//            String cityName = addresses.get(0).getLocality();
+
+//            city.setText(cityName);
+
+            Retrofit retrofit = new Retrofit.Builder()
+                    .baseUrl(BaseUrl)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build();
+            WeatherService service = retrofit.create(WeatherService.class);
+            Call<WeatherResponse> call = service.getCurrentWeatherData(Double.toString(currentLatitude), Double.toString(currentLongitude), AppId);
+            call.enqueue(new Callback<WeatherResponse>() {
+                @Override
+                public void onResponse(@NonNull Call<WeatherResponse> call, @NonNull Response<WeatherResponse> response) {
+                    if (response.code() == 200) {
+                        WeatherResponse weatherResponse = response.body();
+                        assert weatherResponse != null;
+
+                        city = weatherResponse.name;
+
+
+                        double double1 = weatherResponse.main.temp;
+                        temp = Double.toString(Math.round(double1)  - 273);
+
+                    }
+                }
+
+                @Override
+                public void onFailure(@NonNull Call<WeatherResponse> call, @NonNull Throwable t) {
+//                    temp.setText(t.getMessage());
+                }
+            });
+        }
+    }
+
+
+    @Override
+    public void onConnectionSuspended(int i) {}
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+        if (connectionResult.hasResolution()) {
+            try {
+                // Start an Activity that tries to resolve the error
+                connectionResult.startResolutionForResult(this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
+
+            } catch (IntentSender.SendIntentException e) {
+                // Log the error
+                e.printStackTrace();
+            }
+        } else {
+            Log.e("Error", "Location services connection failed with code " + connectionResult.getErrorCode());
+        }
+    }
+
+    /**
+     * If locationChanges change lat and long
+     *
+     *
+     * @param location
+     */
+    @Override
+    public void onLocationChanged(Location location) {
+        currentLatitude = location.getLatitude();
+        currentLongitude = location.getLongitude();
+
+        Toast.makeText(this, currentLatitude + " WORKS " + currentLongitude + "", Toast.LENGTH_LONG).show();
+    }
 
 }
 

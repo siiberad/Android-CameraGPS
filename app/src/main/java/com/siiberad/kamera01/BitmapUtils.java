@@ -8,7 +8,9 @@ import android.net.Uri;
 import android.os.Environment;
 import android.support.v4.content.FileProvider;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.WindowManager;
+import android.webkit.MimeTypeMap;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -141,5 +143,39 @@ class BitmapUtils {
         context.startActivity(shareIntent);
     }
 
+    static void saveImage1(Bitmap finalBitmap) {
 
+        String root = Environment.getExternalStorageDirectory().getAbsolutePath();
+        File myDir = new File(root + "/saved_images");
+        Log.i("Directory", "==" + myDir);
+        myDir.mkdirs();
+
+        String fname = "Image-test" + ".jpg";
+        File file = new File(myDir, fname);
+        if (file.exists()) file.delete();
+        try {
+            FileOutputStream out = new FileOutputStream(file);
+            finalBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out);
+            out.flush();
+            out.close();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    static void send(Context context) {
+        try {
+            File myFile = new File("/storage/emulated/0/saved_images/Image-test.jpg");
+            MimeTypeMap mime = MimeTypeMap.getSingleton();
+            String ext = myFile.getName().substring(myFile.getName().lastIndexOf(".") + 1);
+            String type = mime.getMimeTypeFromExtension(ext);
+            Intent sharingIntent = new Intent("android.intent.action.SEND");
+            sharingIntent.setType(type);
+            sharingIntent.putExtra("android.intent.extra.STREAM", Uri.fromFile(myFile));
+            context.startActivity(Intent.createChooser(sharingIntent, "Share using"));
+        } catch (Exception e) {
+//            Toast.makeText(getBaseContext(), e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
 }
